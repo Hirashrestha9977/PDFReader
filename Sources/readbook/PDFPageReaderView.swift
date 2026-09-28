@@ -20,8 +20,12 @@ extension Image {
 }
 
 /// Shows a PDF one page at a time, with pinch-to-zoom and swipe-to-turn-page gestures.
+/// A "Read Aloud" switch at the top speaks each page and turns to the next one automatically.
 public struct PDFPageReaderView: View {
     @ObservedObject private var reader: PDFReader
+    @StateObject private var speaker = PDFPageSpeaker()
+
+    @State private var isAutoReading = false
 
     @State private var scale: CGFloat = 1.0
     @State private var lastScale: CGFloat = 1.0
@@ -38,6 +42,17 @@ public struct PDFPageReaderView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
+            HStack {
+                Spacer()
+                Toggle("Read Aloud", isOn: $isAutoReading)
+                    .toggleStyle(SwitchToggleStyle())
+                    .fixedSize()
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 8)
+
+            Divider()
+
             GeometryReader { geometry in
                 Group {
                     if let page = reader.currentPage {
@@ -78,6 +93,20 @@ public struct PDFPageReaderView: View {
         }
         .onChange(of: reader.currentPageIndex) { _ in
             resetZoom()
+            if isAutoReading {
+                readCurrentPage()
+            }
+        }
+        .onChange(of: isAutoReading) { isOn in
+            if isOn {
+                readCurrentPage()
+            } else {
+                speaker.stop()
+            }
+        }
+        .onDisappear {
+            isAutoReading = false
+            speaker.stop()
         }
     }
 
@@ -134,6 +163,25 @@ public struct PDFPageReaderView: View {
 
     private func goToPreviousPage() {
         withAnimation { _ = reader.previousPage() }
+    }
+
+    /// Speaks the current page, then advances; pages without text are skipped. Turns itself off after the last page.
+    private func readCurrentPage() {
+        let text = reader.currentPage?.string?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        if text.isEmpty {
+            advanceAutoReading()
+        } else {
+            speaker.speak(text) { advanceAutoReading() }
+        }
+    }
+
+    private func advanceAutoReading() {
+        guard isAutoReading else { return }
+        if reader.isAtLastPage {
+            isAutoReading = false
+        } else {
+            goToNextPage()
+        }
     }
 
     private func resetZoom() {
